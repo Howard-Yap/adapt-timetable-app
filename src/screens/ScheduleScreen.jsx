@@ -77,8 +77,9 @@ export default function ScheduleScreen({
   const handleTouchStart = useCallback((e, block) => {
     if (!isToday || block.type !== 'task') return;
     if (completedTaskIds.includes(block.taskId) || skippedTaskIds.includes(block.taskId)) return;
-    if (block.isNecessity) return; // necessity tasks can't be dragged
+    if (block.isNecessity) return;
 
+    e.preventDefault(); // prevent scroll stealing the touch
     const touch = e.touches[0];
     const startY = touch.clientY;
 
@@ -86,17 +87,20 @@ export default function ScheduleScreen({
       isDragging.current = true;
       setDragging({ block, startY, originalMins: block.startMins, currentDropMins: block.startMins });
       setDragY(0);
-      // Haptic feedback if available
       if (navigator.vibrate) navigator.vibrate(40);
-    }, 400);
+    }, 350);
   }, [isToday, completedTaskIds, skippedTaskIds]);
 
   const handleTouchMove = useCallback((e) => {
-    if (longPressTimer.current && !isDragging.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
+    if (!isDragging.current) {
+      // Cancel long press if user moves before threshold
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
+      return;
     }
-    if (!isDragging.current || !dragging) return;
+    if (!dragging) return;
     e.preventDefault();
 
     const touch = e.touches[0];
@@ -184,7 +188,7 @@ export default function ScheduleScreen({
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         onTouchCancel={handleTouchCancel}
-        style={{ touchAction: dragging ? 'none' : 'pan-y' }}
+        style={{ touchAction: 'pan-y' }}
       >
         <div className="timeline-grid" style={{ height: totalHours * HOUR_HEIGHT }}>
           {hours.map(hourMins => (
@@ -240,6 +244,7 @@ export default function ScheduleScreen({
                   transform: isDraggingThis ? 'scale(1.02)' : 'none',
                   transition: isDraggingThis ? 'none' : 'top 0.2s ease, transform 0.15s ease',
                   boxShadow: isDraggingThis ? '0 8px 24px rgba(0,0,0,0.4)' : 'none',
+                  touchAction: canDrag ? 'none' : 'auto',
                 }}
                 onTouchStart={canDrag ? (e) => handleTouchStart(e, block) : undefined}
               >
