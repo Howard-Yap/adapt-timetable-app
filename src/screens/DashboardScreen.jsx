@@ -4,7 +4,7 @@ import { PRIORITY } from '../engine/scheduler';
 
 export default function DashboardScreen({
   prefs, tasks, schedule, rolledOver, completedTaskIds, skippedTaskIds,
-  endDayMins, getCurrentMins, rebuildCount, onRebuild, onMarkDone, onSkipTask
+  endDayMins, getCurrentMins, rebuildCount, onRebuild, onMarkDone, onSkipTask, onLogout
 }) {
   const [currentMins, setCurrentMins] = useState(getCurrentMins());
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -29,7 +29,7 @@ export default function DashboardScreen({
   const currentBlock = schedule.find(b => b.startMins <= now && b.endMins > now);
   const nextBlock = schedule.find(b => b.startMins > now && !completedTaskIds.includes(b.taskId) && !skippedTaskIds.includes(b.taskId));
 
-  // Upcoming blocks (next 4)
+  // Upcoming blocks (next 5)
   const upcomingBlocks = schedule
     .filter(b => b.endMins > now)
     .slice(0, 5);
@@ -55,9 +55,14 @@ export default function DashboardScreen({
           </div>
           <div className="header-time">{timeFormat(currentTime)}</div>
         </div>
-        <button className="rebuild-btn" onClick={() => onRebuild({ type: 'FULL_REBUILD' })}>
-          ↺ Rebuild
-        </button>
+        <div className="header-actions">
+          <button className="rebuild-btn" onClick={() => onRebuild({ type: 'FULL_REBUILD' })}>
+            ↺ Rebuild
+          </button>
+          <button className="signout-btn" onClick={onLogout}>
+            Sign out
+          </button>
+        </div>
       </div>
 
       {/* Progress Bar */}

@@ -1502,3 +1502,24 @@ html, body {
   flex: 1;
   min-height: 0;
 }
+/* ── Dashboard header actions ── */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.signout-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--color-text-secondary, #a0a0b0);
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.signout-btn:hover {
+  opacity: 0.7;
+}
