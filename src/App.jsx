@@ -263,20 +263,7 @@ export default function App() {
           break;
         }
 
-        case 'FOCUS_MODE': {
-          // Insert a synthetic high-priority focus block starting now
-          const focusTask = {
-            id: `focus-${Date.now()}`,
-            title: '🎯 Focus block',
-            duration: mutation.duration,
-            priority: PRIORITY.HIGH,
-            status: STATUS.PENDING,
-            deadline: null,
-          };
-          updatedTasks = [focusTask, ...updatedTasks];
-          fromMins = mutation.fromMins ?? getCurrentMins();
-          break;
-        }
+
 
         default:
           break;

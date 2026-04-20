@@ -42,10 +42,6 @@ const QUICK_ACTIONS = [
   { label: "Took a 15 min break",          msg: "I took a 15 minute break" },
   { label: "Took a 30 min break",          msg: "I took a 30 minute break" },
 
-  // Focus
-  { label: "Focus mode 30 mins",           msg: "Focus mode for 30 minutes" },
-  { label: "Focus mode 1 hour",            msg: "Focus mode for 1 hour" },
-  { label: "Focus mode 2 hours",           msg: "Focus mode for 2 hours" },
 ];
 
 export default function ChatScreen({
@@ -115,7 +111,6 @@ export default function ChatScreen({
       'ADD_TASK':           '➕ Task added',
       'EXTEND_TASK':        '⏱ Task extended',
       'PRIORITISE_TASK':    '⬆ Priority raised',
-      'FOCUS_MODE':         '🎯 Focus mode on',
       'QUERY_REMAINING':    '📋 Tasks remaining',
     };
     return map[type] || null;

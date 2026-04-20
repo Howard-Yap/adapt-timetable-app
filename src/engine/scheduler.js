@@ -1,5 +1,6 @@
 export const PRIORITY = { HIGH: 3, MEDIUM: 2, LOW: 1 };
 export const STATUS = { PENDING: 'pending', DONE: 'done', SKIPPED: 'skipped', DELAYED: 'delayed' };
+export const CATEGORY = { NECESSITY: 'necessity' };
 
 export function timeToMins(t) {
   if (!t) return 0;
@@ -40,7 +41,6 @@ export function buildSchedule({ uniClasses = [], tasks, wakeTime, endDayTime, br
 
   const blocks = [];
 
-  // Add class blocks
   sortedClasses.forEach(c => {
     blocks.push({
       id: `class-${c.id}`,
@@ -55,11 +55,6 @@ export function buildSchedule({ uniClasses = [], tasks, wakeTime, endDayTime, br
     });
   });
 
-  // Separate tasks with preferred time from those without
-  const fixedTasks = pendingTasks.filter(t => t.preferredTime);
-  const flexTasks = pendingTasks.filter(t => !t.preferredTime);
-
-  // Track occupied intervals (classes + fixed tasks) for collision detection
   const occupied = sortedClasses.map(c => ({
     start: timeToMins(c.startTime),
     end: timeToMins(c.endTime),
@@ -67,61 +62,49 @@ export function buildSchedule({ uniClasses = [], tasks, wakeTime, endDayTime, br
 
   const unscheduledTasks = [];
 
-  // Place fixed-time tasks first
+  const necessityTasks = pendingTasks.filter(t => t.category === 'necessity');
+  const fixedTasks = pendingTasks.filter(t => t.preferredTime && t.category !== 'necessity');
+  const flexTasks = pendingTasks.filter(t => !t.preferredTime && t.category !== 'necessity');
+
+  // Necessity tasks — always at their preferred time, never moved
+  necessityTasks.forEach(task => {
+    if (!task.preferredTime) { flexTasks.push(task); return; }
+    const anchorStart = timeToMins(task.preferredTime);
+    const anchorEnd = anchorStart + task.duration;
+    if (anchorEnd > endMins) { unscheduledTasks.push(task); return; }
+    blocks.push(makeTaskBlock(task, anchorStart, anchorEnd));
+    occupied.push({ start: anchorStart, end: anchorEnd, taskId: task.id });
+  });
+
+  // Fixed-time tasks — placed at preferred time, shift on collision
   fixedTasks.forEach(task => {
     const preferredStart = timeToMins(task.preferredTime);
     const preferredEnd = preferredStart + task.duration;
-
-    // Only reject if preferred time has already passed (before startMins)
-    // or task would end after end of day
-    if (preferredEnd <= startMins || preferredEnd > endMins) {
-      unscheduledTasks.push(task);
-      return;
-    }
-
-    // If preferred start is before current startMins, anchor it at startMins instead
+    if (preferredEnd <= startMins || preferredEnd > endMins) { unscheduledTasks.push(task); return; }
     const actualStart = Math.max(preferredStart, startMins);
     const actualEnd = actualStart + task.duration;
-
-    if (actualEnd > endMins) {
-      unscheduledTasks.push(task);
-      return;
-    }
-
-    // Check for collisions with existing occupied slots
+    if (actualEnd > endMins) { unscheduledTasks.push(task); return; }
     const collision = occupied.some(o => actualStart < o.end && actualEnd > o.start);
     if (collision) {
-      // Find nearest free slot at or after preferred time
       const allOcc = [...occupied].sort((a, b) => a.start - b.start);
-      const freeWindows = computeFreeWindowsFromOccupied(startMins, endMins, allOcc);
-      const fallback = freeWindows.find(w =>
-        w.start >= actualStart && w.end - w.start >= task.duration
-      ) || freeWindows.find(w => w.end - w.start >= task.duration);
-
+      const freeWins = computeFreeWindowsFromOccupied(startMins, endMins, allOcc);
+      const fallback = freeWins.find(w => w.start >= actualStart && w.end - w.start >= task.duration)
+        || freeWins.find(w => w.end - w.start >= task.duration);
       if (fallback) {
         const s = Math.max(fallback.start, actualStart);
-        const adjustedEnd = s + task.duration;
-        if (adjustedEnd <= endMins) {
-          blocks.push(makeTaskBlock(task, s, adjustedEnd));
-          occupied.push({ start: s, end: adjustedEnd, taskId: task.id });
-        } else {
-          unscheduledTasks.push(task);
-        }
-      } else {
-        unscheduledTasks.push(task);
-      }
+        const e = s + task.duration;
+        if (e <= endMins) { blocks.push(makeTaskBlock(task, s, e)); occupied.push({ start: s, end: e, taskId: task.id }); }
+        else unscheduledTasks.push(task);
+      } else unscheduledTasks.push(task);
       return;
     }
-
     blocks.push(makeTaskBlock(task, actualStart, actualEnd));
     occupied.push({ start: actualStart, end: actualEnd, taskId: task.id });
   });
 
-  // Compute free windows around all occupied slots (classes + fixed tasks)
-  const allOccupied = occupied.sort((a, b) => a.start - b.start);
-  const freeWindows = computeFreeWindowsFromOccupied(startMins, endMins, allOccupied);
-
-  // Fill remaining free windows with flex tasks
+  // Flex tasks — fill free windows by priority
+  const allOccSorted = [...occupied].sort((a, b) => a.start - b.start);
+  const freeWindows = computeFreeWindowsFromOccupied(startMins, endMins, allOccSorted);
   let taskQueue = [...flexTasks];
 
   for (const window of freeWindows) {
@@ -136,17 +119,11 @@ export function buildSchedule({ uniClasses = [], tasks, wakeTime, endDayTime, br
       } else if (remaining >= 30) {
         const splitDuration = remaining - breakDuration;
         if (splitDuration >= 25) {
-          blocks.push({
-            ...makeTaskBlock(task, cursor, cursor + splitDuration),
-            title: `${task.title} (cont.)`,
-            isSplit: true,
-          });
+          blocks.push({ ...makeTaskBlock(task, cursor, cursor + splitDuration), title: `${task.title} (cont.)`, isSplit: true });
           taskQueue[0] = { ...task, duration: task.duration - splitDuration };
         }
         cursor = window.end;
-      } else {
-        break;
-      }
+      } else { break; }
     }
   }
 
@@ -163,22 +140,10 @@ function makeTaskBlock(task, startMins, endMins) {
     endMins,
     taskId: task.id,
     priority: task.priority,
-    color: priorityColor(task.priority),
+    color: task.category === 'necessity' ? '#c084fc' : priorityColor(task.priority),
     preferredTime: task.preferredTime || null,
+    isNecessity: task.category === 'necessity',
   };
-}
-
-function computeFreeWindows(startMins, endMins, sortedClasses) {
-  const windows = [];
-  let cursor = startMins;
-  for (const c of sortedClasses) {
-    const cStart = timeToMins(c.startTime);
-    const cEnd = timeToMins(c.endTime);
-    if (cStart > cursor) windows.push({ start: cursor, end: cStart });
-    cursor = Math.max(cursor, cEnd);
-  }
-  if (cursor < endMins) windows.push({ start: cursor, end: endMins });
-  return windows;
 }
 
 function computeFreeWindowsFromOccupied(startMins, endMins, sortedOccupied) {

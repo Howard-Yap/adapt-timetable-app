@@ -1612,3 +1612,181 @@ html, body {
   border-color: #7c6bff;
   color: #a89cff;
 }
+/* ── Necessity task styles ── */
+.necessity-card {
+  border-left: 2px solid #c084fc;
+}
+
+.task-priority-dot.necessity {
+  background: #c084fc;
+}
+
+.necessity-badge {
+  font-size: 10px;
+  background: rgba(192, 132, 252, 0.2);
+  color: #c084fc;
+  border-radius: 20px;
+  padding: 2px 7px;
+  margin-left: 6px;
+  font-weight: 500;
+}
+
+.preferred-time-badge {
+  font-size: 11px;
+  color: rgba(255,255,255,0.5);
+  margin-left: 4px;
+}
+
+.necessity-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.nec-action-btn {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  border: 1px solid rgba(192, 132, 252, 0.3);
+  background: rgba(192, 132, 252, 0.1);
+  color: #c084fc;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.nec-action-btn:hover { opacity: 0.7; }
+
+.nec-action-btn.danger {
+  border-color: rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
+
+.necessity-info {
+  font-size: 12px;
+  color: #c084fc;
+  background: rgba(192, 132, 252, 0.1);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+
+/* Category selector */
+.category-select {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.category-opt {
+  flex: 1;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: transparent;
+  color: rgba(255,255,255,0.5);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.category-opt.selected {
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.3);
+  color: #fff;
+}
+
+.category-opt.necessity.selected {
+  background: rgba(192, 132, 252, 0.15);
+  border-color: #c084fc;
+  color: #c084fc;
+}
+
+/* Delay options modal */
+.delay-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.delay-opt-btn {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: transparent;
+  color: rgba(255,255,255,0.6);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.delay-opt-btn.selected {
+  background: rgba(124, 107, 255, 0.2);
+  border-color: #7c6bff;
+  color: #a89cff;
+}
+
+/* Schedule block necessity style */
+.schedule-block.necessity-block {
+  border-left-color: #c084fc !important;
+}
+
+.necessity-tag {
+  font-size: 10px;
+  margin-left: 4px;
+}
+
+/* ── Day switcher ── */
+.day-switcher {
+  display: flex;
+  gap: 4px;
+  padding: 0 16px 12px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.day-switcher::-webkit-scrollbar { display: none; }
+
+.day-switch-btn {
+  flex-shrink: 0;
+  position: relative;
+  padding: 6px 12px;
+  border-radius: 20px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: transparent;
+  color: rgba(255,255,255,0.5);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.day-switch-btn.active {
+  background: rgba(124, 107, 255, 0.2);
+  border-color: #7c6bff;
+  color: #a89cff;
+}
+
+.day-switch-btn.today {
+  color: rgba(255,255,255,0.8);
+}
+
+.today-dot {
+  position: absolute;
+  bottom: 3px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #7c6bff;
+}
+
+.other-day-note {
+  font-size: 12px;
+  color: rgba(255,255,255,0.35);
+  text-align: center;
+  padding: 0 16px 10px;
+}

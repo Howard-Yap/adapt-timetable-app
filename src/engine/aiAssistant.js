@@ -58,17 +58,6 @@ export function parseIntent(message) {
     return { type: 'PRIORITISE_TASK', taskHint: priorityMatch[1].trim(), raw: message };
   }
 
-  // --- FOCUS MODE ---
-  const focusMatch =
-    msg.match(/(?:focus\s+(?:mode|time|session)|no\s+interruptions?|deep\s+work|block\s+off)\s*(?:for\s+)?(\d+)?\s*(?:min(?:utes?)?|h(?:ours?)?)?/i) ||
-    msg.match(/(?:i\s+need\s+to\s+focus|let\s+me\s+focus|help\s+me\s+focus)/i) ||
-    msg.match(/block\s+(?:off\s+)?(\d+)\s*(?:min(?:utes?)?|h(?:ours?)?)/i);
-  if (focusMatch) {
-    const durStr = focusMatch[1];
-    const duration = durStr ? parseMinutes(durStr, focusMatch[0]) : 60;
-    return { type: 'FOCUS_MODE', duration, raw: message };
-  }
-
   // --- QUERY REMAINING TASKS ---
   if (
     /how many tasks\s*(?:left|remaining|do i have)/i.test(msg) ||
@@ -245,14 +234,6 @@ export function processIntent(intent, state) {
         };
       }
       return { response: `I couldn't find that task. Try saying the name more clearly.`, triggerRebuild: false };
-    }
-
-    case 'FOCUS_MODE': {
-      return {
-        mutation: { type: 'FOCUS_MODE', duration: intent.duration, fromMins: currentMins },
-        response: `Focus mode on — blocking ${formatDuration(intent.duration)} of uninterrupted time starting now. No task switches until you're done.`,
-        triggerRebuild: true,
-      };
     }
 
     case 'QUERY_REMAINING': {
