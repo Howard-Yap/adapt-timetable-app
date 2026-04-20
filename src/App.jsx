@@ -90,6 +90,35 @@ export default function App() {
     return now.getHours() * 60 + now.getMinutes();
   };
 
+  // Reset recurring tasks to PENDING each day
+  useEffect(() => {
+    if (!onboarded) return;
+    const today = getTodayDay().slice(0, 3); // e.g. "Mon"
+    const todayKey = new Date().toDateString();
+    const lastReset = localStorage.getItem('adapt-last-reset');
+    if (lastReset === todayKey) return; // already reset today
+
+    const updated = tasks.map(t => {
+      if (t.recurring && t.recurringDays?.includes(today)) {
+        return { ...t, status: STATUS.PENDING };
+      }
+      return t;
+    });
+
+    // Clear completed/skipped IDs for recurring tasks that apply today
+    const recurringTodayIds = tasks
+      .filter(t => t.recurring && t.recurringDays?.includes(today))
+      .map(t => t.id);
+
+    if (recurringTodayIds.length > 0) {
+      setTasks(updated);
+      setCompletedTaskIds(prev => prev.filter(id => !recurringTodayIds.includes(id)));
+      setSkippedTaskIds(prev => prev.filter(id => !recurringTodayIds.includes(id)));
+    }
+
+    localStorage.setItem('adapt-last-reset', todayKey);
+  }, [onboarded]);
+
   const getTodayClasses = useCallback((classes) => {
     const today = getTodayDay();
     return classes.filter(c => c.enabled !== false && c.day === today);

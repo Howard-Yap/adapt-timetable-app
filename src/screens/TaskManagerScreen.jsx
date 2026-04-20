@@ -9,6 +9,22 @@ const PRIORITY_OPTIONS = [
 
 const STATUS_FILTERS = ['all', 'pending', 'done', 'skipped'];
 
+const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const DAY_FULL = {
+  Mon: 'Monday', Tue: 'Tuesday', Wed: 'Wednesday', Thu: 'Thursday',
+  Fri: 'Friday', Sat: 'Saturday', Sun: 'Sunday',
+};
+
+const EMPTY_FORM = {
+  title: '',
+  duration: 60,
+  priority: PRIORITY.MEDIUM,
+  deadline: '',
+  category: '',
+  recurring: false,
+  recurringDays: [],
+};
+
 export default function TaskManagerScreen({
   tasks, rolledOver, completedTaskIds, skippedTaskIds,
   onAddTask, onUpdateTask, onDeleteTask, onMarkDone, onSkipTask
@@ -16,13 +32,7 @@ export default function TaskManagerScreen({
   const [filter, setFilter] = useState('all');
   const [showForm, setShowForm] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
-  const [form, setForm] = useState({
-    title: '',
-    duration: 60,
-    priority: PRIORITY.MEDIUM,
-    deadline: '',
-    category: '',
-  });
+  const [form, setForm] = useState(EMPTY_FORM);
 
   const filtered = tasks.filter(t => {
     if (filter === 'all') return true;
@@ -33,26 +43,26 @@ export default function TaskManagerScreen({
   });
 
   const resetForm = () => {
-    setForm({ title: '', duration: 60, priority: PRIORITY.MEDIUM, deadline: '', category: '' });
+    setForm(EMPTY_FORM);
     setEditingTask(null);
     setShowForm(false);
   };
 
   const handleSubmit = () => {
     if (!form.title.trim()) return;
+    const taskData = {
+      title: form.title.trim(),
+      duration: parseInt(form.duration) || 60,
+      priority: parseInt(form.priority),
+      deadline: form.deadline || null,
+      category: form.category,
+      recurring: form.recurring,
+      recurringDays: form.recurring ? form.recurringDays : [],
+    };
     if (editingTask) {
-      onUpdateTask(editingTask, {
-        ...form,
-        status: STATUS.PENDING,
-      });
+      onUpdateTask(editingTask, { ...taskData, status: STATUS.PENDING });
     } else {
-      onAddTask({
-        title: form.title.trim(),
-        duration: parseInt(form.duration) || 60,
-        priority: parseInt(form.priority),
-        deadline: form.deadline || null,
-        category: form.category,
-      });
+      onAddTask(taskData);
     }
     resetForm();
   };
@@ -64,9 +74,24 @@ export default function TaskManagerScreen({
       priority: task.priority,
       deadline: task.deadline ? task.deadline.slice(0, 10) : '',
       category: task.category || '',
+      recurring: task.recurring || false,
+      recurringDays: task.recurringDays || [],
     });
     setEditingTask(task.id);
     setShowForm(true);
+  };
+
+  const toggleDay = (day) => {
+    setForm(f => ({
+      ...f,
+      recurringDays: f.recurringDays.includes(day)
+        ? f.recurringDays.filter(d => d !== day)
+        : [...f.recurringDays, day],
+    }));
+  };
+
+  const setDaily = () => {
+    setForm(f => ({ ...f, recurringDays: [...DAYS] }));
   };
 
   const getTaskStatus = (task) => {
@@ -76,6 +101,12 @@ export default function TaskManagerScreen({
   };
 
   const priorityInfo = (p) => PRIORITY_OPTIONS.find(o => o.value === p) || PRIORITY_OPTIONS[1];
+
+  const recurringLabel = (task) => {
+    if (!task.recurring || !task.recurringDays?.length) return null;
+    if (task.recurringDays.length === 7) return 'Daily';
+    return task.recurringDays.join(', ');
+  };
 
   return (
     <div className="screen tasks-screen">
@@ -121,12 +152,16 @@ export default function TaskManagerScreen({
         {filtered.map(task => {
           const status = getTaskStatus(task);
           const p = priorityInfo(task.priority);
+          const recLabel = recurringLabel(task);
           return (
             <div key={task.id} className={`task-card ${status}`}>
               <div className="task-left">
                 <div className={`task-priority-dot ${p.cls}`} />
                 <div className="task-info">
-                  <div className="task-title">{task.title}</div>
+                  <div className="task-title">
+                    {task.title}
+                    {recLabel && <span className="recurring-badge">↻ {recLabel}</span>}
+                  </div>
                   <div className="task-meta">
                     <span>{formatDuration(task.duration)}</span>
                     {task.deadline && (
@@ -222,12 +257,51 @@ export default function TaskManagerScreen({
               onChange={e => setForm(f => ({ ...f, deadline: e.target.value }))}
             />
 
+            {/* Recurring toggle */}
+            <div className="recurring-row">
+              <label className="input-label" style={{ margin: 0 }}>Recurring</label>
+              <button
+                className={`toggle-btn ${form.recurring ? 'on' : 'off'}`}
+                onClick={() => setForm(f => ({
+                  ...f,
+                  recurring: !f.recurring,
+                  recurringDays: !f.recurring ? [] : f.recurringDays,
+                }))}
+              >
+                {form.recurring ? 'On' : 'Off'}
+              </button>
+            </div>
+
+            {form.recurring && (
+              <div className="recurring-days-section">
+                <div className="recurring-shortcut">
+                  <button
+                    className={`day-shortcut-btn ${form.recurringDays.length === 7 ? 'selected' : ''}`}
+                    onClick={setDaily}
+                  >
+                    Daily
+                  </button>
+                </div>
+                <div className="day-selector">
+                  {DAYS.map(day => (
+                    <button
+                      key={day}
+                      className={`day-btn ${form.recurringDays.includes(day) ? 'selected' : ''}`}
+                      onClick={() => toggleDay(day)}
+                    >
+                      {day}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="modal-footer">
               <button className="btn-ghost" onClick={resetForm}>Cancel</button>
               <button
                 className="btn-primary"
                 onClick={handleSubmit}
-                disabled={!form.title.trim()}
+                disabled={!form.title.trim() || (form.recurring && form.recurringDays.length === 0)}
               >
                 {editingTask ? 'Save changes' : 'Add task'}
               </button>
