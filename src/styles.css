@@ -1481,3 +1481,24 @@ html, body {
   text-align: center;
   font-family: var(--font-body);
 }
+/* ── Expanded quick actions (no chatbox layout) ── */
+
+.quick-actions-expanded {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 16px 20px;
+  overflow-y: auto;
+  max-height: 45vh;
+  align-content: flex-start;
+}
+
+.quick-actions-expanded .quick-action-btn {
+  flex: 0 0 auto;
+}
+
+/* Make the message area shorter since pills take more space */
+.chat-screen .chat-messages {
+  flex: 1;
+  min-height: 0;
+}

@@ -2,14 +2,50 @@ import React, { useState, useRef, useEffect } from 'react';
 import { parseIntent, processIntent } from '../engine/aiAssistant';
 
 const QUICK_ACTIONS = [
-  "I'm running late",
-  "I'm ready to start",
-  "What's next?",
-  "What's left today?",
-  "Skip this task",
-  "I'm tired",
-  "Focus mode for 1 hour",
-  "Rebuild my day",
+  // Time & Schedule
+  { label: "I'm running late",             msg: "I'm running late" },
+  { label: "Running late 15 mins",         msg: "I'm running late by 15 minutes" },
+  { label: "Running late 30 mins",         msg: "I'm running late by 30 minutes" },
+  { label: "Push everything back 20 mins", msg: "Push everything back 20 minutes" },
+  { label: "Start now",                    msg: "I'm ready to start" },
+  { label: "Start at 9am",                 msg: "Starting at 9am" },
+  { label: "Start at 10am",                msg: "Starting at 10am" },
+  { label: "Finish by 6pm",                msg: "Finish by 6pm" },
+  { label: "Finish by 8pm",                msg: "Finish by 8pm" },
+  { label: "Only have 2 hours left",       msg: "I only have 2 hours left today" },
+  { label: "Only have 1 hour left",        msg: "I only have 1 hour left today" },
+  { label: "Rebuild my day",               msg: "Rebuild my day" },
+
+  // Tasks
+  { label: "What's next?",                 msg: "What's next?" },
+  { label: "What's left today?",           msg: "What's left today?" },
+  { label: "Skip this task",               msg: "Skip this task" },
+  { label: "Mark this done",               msg: "Done" },
+  { label: "Move this to tomorrow",        msg: "Move this task to tomorrow" },
+  { label: "Extend task 15 mins",          msg: "Still working on this, extend by 15 minutes" },
+  { label: "Extend task 30 mins",          msg: "Still working on this, extend by 30 minutes" },
+  { label: "Make this high priority",      msg: "Make this task high priority" },
+  { label: "Add 30 min study block",       msg: "Add study block for 30 mins" },
+  { label: "Add 1 hr revision",            msg: "Add revision for 1 hour, high priority" },
+  { label: "Show my schedule",             msg: "Show my schedule" },
+  { label: "How much time left?",          msg: "How much time do I have left?" },
+
+  // Energy & Load
+  { label: "I'm tired",                    msg: "I'm tired" },
+  { label: "I'm exhausted",               msg: "I'm exhausted" },
+  { label: "Make today lighter",           msg: "Make today lighter" },
+  { label: "Feeling productive",           msg: "Feeling good and productive" },
+  { label: "On a roll — add more",         msg: "I'm on a roll" },
+
+  // Breaks
+  { label: "Just had a break",             msg: "I just had a break" },
+  { label: "Took a 15 min break",          msg: "I took a 15 minute break" },
+  { label: "Took a 30 min break",          msg: "I took a 30 minute break" },
+
+  // Focus
+  { label: "Focus mode 30 mins",           msg: "Focus mode for 30 minutes" },
+  { label: "Focus mode 1 hour",            msg: "Focus mode for 1 hour" },
+  { label: "Focus mode 2 hours",           msg: "Focus mode for 2 hours" },
 ];
 
 export default function ChatScreen({
@@ -17,7 +53,6 @@ export default function ChatScreen({
   completedTaskIds, skippedTaskIds, chatMessages,
   onAddChatMessage, onRebuild
 }) {
-  const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const bottomRef = useRef(null);
 
@@ -26,10 +61,10 @@ export default function ChatScreen({
   }, [chatMessages]);
 
   const sendMessage = (text) => {
+    if (isTyping) return;
     const currentMins = getCurrentMins();
     const userMsg = { role: 'user', text, time: new Date() };
     onAddChatMessage(userMsg);
-    setInput('');
     setIsTyping(true);
 
     setTimeout(() => {
@@ -59,35 +94,29 @@ export default function ChatScreen({
     }, 600);
   };
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (input.trim() && !isTyping) sendMessage(input.trim());
-  };
-
   const formatTime = (d) =>
     new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   const intentLabel = (type) => {
     const map = {
-      'RUNNING_LATE':     '⏰ Late detected',
-      'FULL_REBUILD':     '🔁 Rebuilding',
-      'LOWER_LOAD':       '😌 Lightening load',
-      'SKIP_TASK':        '⏭ Task skipped',
-      'MOVE_TASK':        '📅 Task moved',
-      'COMPLETE_TASK':    '✓ Task done',
-      'MARK_DONE':        '✓ Marked done',
-      'SET_END_TIME':     '🌙 End time updated',
+      'RUNNING_LATE':       '⏰ Late detected',
+      'FULL_REBUILD':       '🔁 Rebuilding',
+      'LOWER_LOAD':         '😌 Lightening load',
+      'SKIP_TASK':          '⏭ Task skipped',
+      'MOVE_TASK':          '📅 Task moved',
+      'COMPLETE_TASK':      '✓ Task done',
+      'MARK_DONE':          '✓ Marked done',
+      'SET_END_TIME':       '🌙 End time updated',
       'SET_REMAINING_TIME': '⏳ Time adjusted',
-      'START_AT':         '⏰ Time shifted',
-      'TOOK_BREAK':       '☕ Break noted',
-      'PUSH_ALL':         '→ Schedule shifted',
-      'START_NOW':        '▶ Starting now',
-      // new
-      'ADD_TASK':         '➕ Task added',
-      'EXTEND_TASK':      '⏱ Task extended',
-      'PRIORITISE_TASK':  '⬆ Priority raised',
-      'FOCUS_MODE':       '🎯 Focus mode on',
-      'QUERY_REMAINING':  '📋 Tasks remaining',
+      'START_AT':           '⏰ Time shifted',
+      'TOOK_BREAK':         '☕ Break noted',
+      'PUSH_ALL':           '→ Schedule shifted',
+      'START_NOW':          '▶ Starting now',
+      'ADD_TASK':           '➕ Task added',
+      'EXTEND_TASK':        '⏱ Task extended',
+      'PRIORITISE_TASK':    '⬆ Priority raised',
+      'FOCUS_MODE':         '🎯 Focus mode on',
+      'QUERY_REMAINING':    '📋 Tasks remaining',
     };
     return map[type] || null;
   };
@@ -102,6 +131,7 @@ export default function ChatScreen({
         </div>
       </div>
 
+      {/* Message history */}
       <div className="chat-messages">
         {chatMessages.map((msg, i) => (
           <div key={i} className={`chat-message ${msg.role}`}>
@@ -141,35 +171,19 @@ export default function ChatScreen({
         <div ref={bottomRef} />
       </div>
 
-      <div className="quick-actions">
+      {/* Scrollable pill actions — main interaction surface */}
+      <div className="quick-actions quick-actions-expanded">
         {QUICK_ACTIONS.map(action => (
           <button
-            key={action}
+            key={action.label}
             className="quick-action-btn"
-            onClick={() => sendMessage(action)}
+            onClick={() => sendMessage(action.msg)}
             disabled={isTyping}
           >
-            {action}
+            {action.label}
           </button>
         ))}
       </div>
-
-      <form className="chat-input-form" onSubmit={handleSubmit}>
-        <input
-          className="chat-input"
-          placeholder="Tell me what's happening..."
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          disabled={isTyping}
-        />
-        <button
-          type="submit"
-          className="send-btn"
-          disabled={!input.trim() || isTyping}
-        >
-          ↑
-        </button>
-      </form>
     </div>
   );
 }
