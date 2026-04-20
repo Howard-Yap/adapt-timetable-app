@@ -72,33 +72,49 @@ export function buildSchedule({ uniClasses = [], tasks, wakeTime, endDayTime, br
     const preferredStart = timeToMins(task.preferredTime);
     const preferredEnd = preferredStart + task.duration;
 
-    // Check if within day bounds
-    if (preferredStart < startMins || preferredEnd > endMins) {
+    // Only reject if preferred time has already passed (before startMins)
+    // or task would end after end of day
+    if (preferredEnd <= startMins || preferredEnd > endMins) {
+      unscheduledTasks.push(task);
+      return;
+    }
+
+    // If preferred start is before current startMins, anchor it at startMins instead
+    const actualStart = Math.max(preferredStart, startMins);
+    const actualEnd = actualStart + task.duration;
+
+    if (actualEnd > endMins) {
       unscheduledTasks.push(task);
       return;
     }
 
     // Check for collisions with existing occupied slots
-    const collision = occupied.some(o => preferredStart < o.end && preferredEnd > o.start);
+    const collision = occupied.some(o => actualStart < o.end && actualEnd > o.start);
     if (collision) {
-      // Try to find the nearest free slot after preferred time
-      const freeWindows = computeFreeWindows(startMins, endMins, [
-        ...sortedClasses,
-        ...occupied.filter(o => o.taskId), // already-placed fixed tasks
-      ]);
-      const fallback = freeWindows.find(w => w.end - w.start >= task.duration);
+      // Find nearest free slot at or after preferred time
+      const allOcc = [...occupied].sort((a, b) => a.start - b.start);
+      const freeWindows = computeFreeWindowsFromOccupied(startMins, endMins, allOcc);
+      const fallback = freeWindows.find(w =>
+        w.start >= actualStart && w.end - w.start >= task.duration
+      ) || freeWindows.find(w => w.end - w.start >= task.duration);
+
       if (fallback) {
-        const s = fallback.start;
-        blocks.push(makeTaskBlock(task, s, s + task.duration));
-        occupied.push({ start: s, end: s + task.duration, taskId: task.id });
+        const s = Math.max(fallback.start, actualStart);
+        const adjustedEnd = s + task.duration;
+        if (adjustedEnd <= endMins) {
+          blocks.push(makeTaskBlock(task, s, adjustedEnd));
+          occupied.push({ start: s, end: adjustedEnd, taskId: task.id });
+        } else {
+          unscheduledTasks.push(task);
+        }
       } else {
         unscheduledTasks.push(task);
       }
       return;
     }
 
-    blocks.push(makeTaskBlock(task, preferredStart, preferredEnd));
-    occupied.push({ start: preferredStart, end: preferredEnd, taskId: task.id });
+    blocks.push(makeTaskBlock(task, actualStart, actualEnd));
+    occupied.push({ start: actualStart, end: actualEnd, taskId: task.id });
   });
 
   // Compute free windows around all occupied slots (classes + fixed tasks)
