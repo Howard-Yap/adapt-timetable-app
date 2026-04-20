@@ -74,26 +74,39 @@ export default function ScheduleScreen({
   const minsFromPx = (px) => startMins + (px / HOUR_HEIGHT) * 60;
 
   // Long press handlers
-  const handleTouchStart = useCallback((e, block) => {
-    if (!isToday || block.type !== 'task') return;
-    if (completedTaskIds.includes(block.taskId) || skippedTaskIds.includes(block.taskId)) return;
-    if (block.isNecessity) return;
+  // Attach non-passive touch listeners directly to the grid
+  const gridRef = useRef(null);
 
-    e.preventDefault(); // prevent scroll stealing the touch
-    const touch = e.touches[0];
-    const startY = touch.clientY;
+  useEffect(() => {
+    const grid = gridRef.current;
+    if (!grid) return;
 
-    longPressTimer.current = setTimeout(() => {
-      isDragging.current = true;
-      setDragging({ block, startY, originalMins: block.startMins, currentDropMins: block.startMins });
-      setDragY(0);
-      if (navigator.vibrate) navigator.vibrate(40);
-    }, 350);
-  }, [isToday, completedTaskIds, skippedTaskIds]);
+    const onTouchStart = (e) => {
+      // Find which block was touched
+      const target = e.target.closest('.schedule-block.draggable');
+      if (!target) return;
+
+      const blockId = target.dataset.blockId;
+      const block = daySchedule.find(b => b.id === blockId);
+      if (!block) return;
+
+      e.preventDefault();
+      const touch = e.touches[0];
+      const startY = touch.clientY;
+
+      longPressTimer.current = setTimeout(() => {
+        isDragging.current = true;
+        setDragging({ block, startY, originalMins: block.startMins, currentDropMins: block.startMins });
+        if (navigator.vibrate) navigator.vibrate(40);
+      }, 350);
+    };
+
+    grid.addEventListener('touchstart', onTouchStart, { passive: false });
+    return () => grid.removeEventListener('touchstart', onTouchStart);
+  }, [daySchedule]);
 
   const handleTouchMove = useCallback((e) => {
     if (!isDragging.current) {
-      // Cancel long press if user moves before threshold
       if (longPressTimer.current) {
         clearTimeout(longPressTimer.current);
         longPressTimer.current = null;
@@ -190,7 +203,7 @@ export default function ScheduleScreen({
         onTouchCancel={handleTouchCancel}
         style={{ touchAction: 'pan-y' }}
       >
-        <div className="timeline-grid" style={{ height: totalHours * HOUR_HEIGHT }}>
+        <div className="timeline-grid" ref={gridRef} style={{ height: totalHours * HOUR_HEIGHT }}>
           {hours.map(hourMins => (
             <div key={hourMins} className="hour-line" style={{ top: pxFromMins(hourMins) }}>
               <span className="hour-label">{minsToTime(hourMins)}</span>
@@ -234,6 +247,7 @@ export default function ScheduleScreen({
             return (
               <div
                 key={block.id}
+                data-block-id={block.id}
                 className={`schedule-block ${block.type} ${isDone ? 'done' : ''} ${isSkipped ? 'skipped' : ''} ${isPast && !isDone ? 'past' : ''} ${isNec ? 'necessity-block' : ''} ${isDraggingThis ? 'dragging' : ''} ${canDrag ? 'draggable' : ''}`}
                 style={{
                   top: isDraggingThis ? pxFromMins(draggedMins) + 8 : top + 8,
@@ -246,7 +260,6 @@ export default function ScheduleScreen({
                   boxShadow: isDraggingThis ? '0 8px 24px rgba(0,0,0,0.4)' : 'none',
                   touchAction: canDrag ? 'none' : 'auto',
                 }}
-                onTouchStart={canDrag ? (e) => handleTouchStart(e, block) : undefined}
               >
                 <div className="block-content">
                   <div className="block-title">
