@@ -1,13 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { minsToTime, formatDuration, buildSchedule, timeToMins } from '../engine/scheduler';
 
 const HOUR_HEIGHT = 64;
+const SNAP_MINS = 15;
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const DAY_FULL = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 function getTodayIndex() {
   const d = new Date().getDay();
-  return d === 0 ? 6 : d - 1; // Mon=0 ... Sun=6
+  return d === 0 ? 6 : d - 1;
 }
 
 function timeToMinsFallback(t) {
@@ -16,14 +17,24 @@ function timeToMinsFallback(t) {
   return h * 60 + (m || 0);
 }
 
+function snapToGrid(mins) {
+  return Math.round(mins / SNAP_MINS) * SNAP_MINS;
+}
+
 export default function ScheduleScreen({
   schedule, tasks, completedTaskIds, skippedTaskIds, endDayMins,
-  getCurrentMins, onMarkDone, onSkipTask, prefs, uniClasses
+  getCurrentMins, onMarkDone, onSkipTask, onUpdateTask, onRebuild, prefs, uniClasses
 }) {
   const [currentMins, setCurrentMins] = useState(getCurrentMins());
   const [selectedDay, setSelectedDay] = useState(getTodayIndex());
   const containerRef = useRef(null);
   const todayIndex = getTodayIndex();
+
+  // Drag state
+  const [dragging, setDragging] = useState(null); // { block, startY, startMins, currentMins }
+  const [dragY, setDragY] = useState(0);
+  const longPressTimer = useRef(null);
+  const isDragging = useRef(false);
 
   useEffect(() => {
     const t = setInterval(() => setCurrentMins(getCurrentMins()), 60000);
@@ -39,19 +50,16 @@ export default function ScheduleScreen({
   }, [selectedDay]);
 
   const isToday = selectedDay === todayIndex;
-
-  // Build the schedule for the selected day
   const dayName = DAY_FULL[selectedDay];
+
   const daySchedule = isToday
     ? schedule
     : buildSchedule({
         uniClasses: (uniClasses || []).filter(c => c.enabled !== false && c.day === dayName),
         tasks: tasks.filter(t => {
           if (t.status === 'done' || t.status === 'skipped') return false;
-          if (t.recurring && t.recurringDays) {
-            return t.recurringDays.includes(DAYS[selectedDay]);
-          }
-          return false; // non-recurring tasks only show on today
+          if (t.recurring && t.recurringDays) return t.recurringDays.includes(DAYS[selectedDay]);
+          return false;
         }),
         wakeTime: prefs.wakeTime || '07:00',
         endDayTime: prefs.endDayTime || '22:00',
@@ -59,10 +67,83 @@ export default function ScheduleScreen({
       }).blocks;
 
   const startMins = timeToMinsFallback(prefs.wakeTime || '07:00');
-  const totalMins = timeToMinsFallback(prefs.endDayTime || '22:00') - startMins;
-  const totalHours = Math.ceil(totalMins / 60);
+  const endMinsDay = timeToMinsFallback(prefs.endDayTime || '22:00');
+  const totalHours = Math.ceil((endMinsDay - startMins) / 60);
   const hours = Array.from({ length: totalHours + 1 }, (_, i) => startMins + i * 60);
   const pxFromMins = (mins) => ((mins - startMins) / 60) * HOUR_HEIGHT;
+  const minsFromPx = (px) => startMins + (px / HOUR_HEIGHT) * 60;
+
+  // Long press handlers
+  const handleTouchStart = useCallback((e, block) => {
+    if (!isToday || block.type !== 'task') return;
+    if (completedTaskIds.includes(block.taskId) || skippedTaskIds.includes(block.taskId)) return;
+    if (block.isNecessity) return; // necessity tasks can't be dragged
+
+    const touch = e.touches[0];
+    const startY = touch.clientY;
+
+    longPressTimer.current = setTimeout(() => {
+      isDragging.current = true;
+      setDragging({ block, startY, originalMins: block.startMins, currentDropMins: block.startMins });
+      setDragY(0);
+      // Haptic feedback if available
+      if (navigator.vibrate) navigator.vibrate(40);
+    }, 400);
+  }, [isToday, completedTaskIds, skippedTaskIds]);
+
+  const handleTouchMove = useCallback((e) => {
+    if (longPressTimer.current && !isDragging.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+    if (!isDragging.current || !dragging) return;
+    e.preventDefault();
+
+    const touch = e.touches[0];
+    const deltaY = touch.clientY - dragging.startY;
+    const deltaMins = (deltaY / HOUR_HEIGHT) * 60;
+    const rawMins = dragging.originalMins + deltaMins;
+    const snapped = snapToGrid(rawMins);
+    const clamped = Math.max(startMins, Math.min(endMinsDay - dragging.block.duration, snapped));
+
+    setDragY(deltaY);
+    setDragging(d => ({ ...d, currentDropMins: clamped }));
+  }, [dragging, startMins, endMinsDay]);
+
+  const handleTouchEnd = useCallback(() => {
+    clearTimeout(longPressTimer.current);
+    longPressTimer.current = null;
+
+    if (!isDragging.current || !dragging) {
+      isDragging.current = false;
+      return;
+    }
+
+    isDragging.current = false;
+    const { block, currentDropMins } = dragging;
+
+    // Update the task's preferred time and rebuild
+    const newTime = minsToTime(currentDropMins);
+    const task = tasks.find(t => t.id === block.taskId);
+    if (task) {
+      onUpdateTask(task.id, { ...task, preferredTime: newTime });
+      onRebuild({ type: 'RESCHEDULE_FROM', fromMins: getCurrentMins() });
+    }
+
+    setDragging(null);
+    setDragY(0);
+  }, [dragging, tasks, onUpdateTask, onRebuild, getCurrentMins]);
+
+  const handleTouchCancel = useCallback(() => {
+    clearTimeout(longPressTimer.current);
+    longPressTimer.current = null;
+    isDragging.current = false;
+    setDragging(null);
+    setDragY(0);
+  }, []);
+
+  const draggedMins = dragging?.currentDropMins ?? 0;
+  const draggedBlock = dragging?.block;
 
   return (
     <div className="screen schedule-screen">
@@ -90,13 +171,21 @@ export default function ScheduleScreen({
         ))}
       </div>
 
+      {isToday && (
+        <div className="other-day-note">Hold & drag a task to reschedule it</div>
+      )}
       {!isToday && (
-        <div className="other-day-note">
-          Showing recurring tasks and classes for {dayName}
-        </div>
+        <div className="other-day-note">Showing recurring tasks and classes for {dayName}</div>
       )}
 
-      <div className="timeline-container" ref={containerRef}>
+      <div
+        className="timeline-container"
+        ref={containerRef}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchCancel}
+        style={{ touchAction: dragging ? 'none' : 'pan-y' }}
+      >
         <div className="timeline-grid" style={{ height: totalHours * HOUR_HEIGHT }}>
           {hours.map(hourMins => (
             <div key={hourMins} className="hour-line" style={{ top: pxFromMins(hourMins) }}>
@@ -105,7 +194,20 @@ export default function ScheduleScreen({
             </div>
           ))}
 
-          {/* Current time indicator — only on today */}
+          {/* Drop target indicator while dragging */}
+          {dragging && (
+            <div
+              className="drag-drop-indicator"
+              style={{
+                top: pxFromMins(draggedMins) + 8,
+                height: Math.max(32, ((draggedBlock.endMins - draggedBlock.startMins) / 60) * HOUR_HEIGHT - 4),
+              }}
+            >
+              <span className="drag-drop-time">{minsToTime(draggedMins)}</span>
+            </div>
+          )}
+
+          {/* Current time indicator */}
           {isToday && currentMins >= startMins && currentMins <= endDayMins && (
             <div className="current-time-line" style={{ top: pxFromMins(currentMins) }}>
               <div className="current-time-dot" />
@@ -116,32 +218,46 @@ export default function ScheduleScreen({
 
           {/* Schedule blocks */}
           {daySchedule.map(block => {
+            const isDraggingThis = draggedBlock?.id === block.id;
             const top = pxFromMins(block.startMins);
             const height = Math.max(32, ((block.endMins - block.startMins) / 60) * HOUR_HEIGHT - 4);
             const isDone = completedTaskIds.includes(block.taskId);
             const isSkipped = skippedTaskIds.includes(block.taskId);
             const isPast = isToday && block.endMins < currentMins;
+            const isNec = block.isNecessity;
+            const canDrag = isToday && block.type === 'task' && !isDone && !isSkipped && !isNec;
 
             return (
               <div
                 key={block.id}
-                className={`schedule-block ${block.type} ${isDone ? 'done' : ''} ${isSkipped ? 'skipped' : ''} ${isPast && !isDone ? 'past' : ''} ${block.isNecessity ? 'necessity-block' : ''}`}
-                style={{ top: top + 8, height, borderLeftColor: block.color }}
+                className={`schedule-block ${block.type} ${isDone ? 'done' : ''} ${isSkipped ? 'skipped' : ''} ${isPast && !isDone ? 'past' : ''} ${isNec ? 'necessity-block' : ''} ${isDraggingThis ? 'dragging' : ''} ${canDrag ? 'draggable' : ''}`}
+                style={{
+                  top: isDraggingThis ? pxFromMins(draggedMins) + 8 : top + 8,
+                  height,
+                  borderLeftColor: block.color,
+                  zIndex: isDraggingThis ? 50 : 1,
+                  opacity: isDraggingThis ? 0.85 : 1,
+                  transform: isDraggingThis ? 'scale(1.02)' : 'none',
+                  transition: isDraggingThis ? 'none' : 'top 0.2s ease, transform 0.15s ease',
+                  boxShadow: isDraggingThis ? '0 8px 24px rgba(0,0,0,0.4)' : 'none',
+                }}
+                onTouchStart={canDrag ? (e) => handleTouchStart(e, block) : undefined}
               >
                 <div className="block-content">
                   <div className="block-title">
                     {block.title}
-                    {block.isNecessity && <span className="necessity-tag">⭐</span>}
+                    {isNec && <span className="necessity-tag">⭐</span>}
+                    {canDrag && <span className="drag-handle">⠿</span>}
                     {block.isSplit && <span className="split-tag">↧</span>}
                     {isDone && <span className="done-tag">✓</span>}
                     {isSkipped && <span className="skip-tag">—</span>}
                   </div>
                   <div className="block-time">
-                    {minsToTime(block.startMins)} – {minsToTime(block.endMins)}
+                    {minsToTime(isDraggingThis ? draggedMins : block.startMins)} – {minsToTime(isDraggingThis ? draggedMins + (block.endMins - block.startMins) : block.endMins)}
                     {' '}· {formatDuration(block.endMins - block.startMins)}
                   </div>
                 </div>
-                {isToday && block.type === 'task' && !isDone && !isSkipped && (
+                {isToday && block.type === 'task' && !isDone && !isSkipped && !isDraggingThis && (
                   <div className="block-actions">
                     <button className="micro-btn done" onClick={() => onMarkDone(block.taskId)}>✓</button>
                     <button className="micro-btn skip" onClick={() => onSkipTask(block.taskId)}>→</button>
@@ -152,6 +268,13 @@ export default function ScheduleScreen({
           })}
         </div>
       </div>
+
+      {/* Drag overlay hint */}
+      {dragging && (
+        <div className="drag-overlay-hint">
+          Drop at {minsToTime(draggedMins)} — release to confirm
+        </div>
+      )}
     </div>
   );
 }
