@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { processIntentAsync } from '../engine/aiAssistant';
+import { parseIntent, processIntent } from '../engine/aiAssistant';
 
 const QUICK_ACTIONS = [
   "I'm running late",
@@ -24,15 +24,16 @@ export default function ChatScreen({
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
-  const sendMessage = async (text) => {
+  const sendMessage = (text) => {
     const currentMins = getCurrentMins();
     const userMsg = { role: 'user', text, time: new Date() };
     onAddChatMessage(userMsg);
     setInput('');
     setIsTyping(true);
 
-    try {
-      const result = await processIntentAsync(text, {
+    setTimeout(() => {
+      const intent = parseIntent(text);
+      const result = processIntent(intent, {
         schedule,
         tasks,
         currentMins,
@@ -48,20 +49,13 @@ export default function ChatScreen({
       const aiMsg = {
         role: 'ai',
         text: result.response,
+        intent: intent.type,
         time: new Date(),
         didRebuild: result.triggerRebuild,
       };
       onAddChatMessage(aiMsg);
-    } catch (err) {
-      onAddChatMessage({
-        role: 'ai',
-        text: "Sorry, something went wrong. Please try again.",
-        time: new Date(),
-        didRebuild: false,
-      });
-    }
-
-    setIsTyping(false);
+      setIsTyping(false);
+    }, 600);
   };
 
   const handleSubmit = (e) => {
@@ -71,13 +65,32 @@ export default function ChatScreen({
 
   const formatTime = (d) => new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
+  const intentLabel = (type) => {
+    const map = {
+      'RUNNING_LATE': '⏰ Late detected',
+      'FULL_REBUILD': '🔁 Rebuilding',
+      'LOWER_LOAD': '😌 Lightening load',
+      'SKIP_TASK': '⏭ Task skipped',
+      'MOVE_TASK': '📅 Task moved',
+      'COMPLETE_TASK': '✓ Task done',
+      'MARK_DONE': '✓ Marked done',
+      'SET_END_TIME': '🌙 End time updated',
+      'SET_REMAINING_TIME': '⏳ Time adjusted',
+      'START_AT': '⏰ Time shifted',
+      'TOOK_BREAK': '☕ Break noted',
+      'PUSH_ALL': '→ Schedule shifted',
+      'START_NOW': '▶ Starting now',
+    };
+    return map[type] || null;
+  };
+
   return (
     <div className="screen chat-screen">
       <div className="chat-header">
         <div className="chat-ai-avatar">◎</div>
         <div>
           <div className="chat-ai-name">Adapt AI</div>
-          <div className="chat-ai-status">● Powered by Claude</div>
+          <div className="chat-ai-status">● Watching your schedule</div>
         </div>
       </div>
 
@@ -86,10 +99,17 @@ export default function ChatScreen({
           <div key={i} className={`chat-message ${msg.role}`}>
             {msg.role === 'ai' && <div className="msg-avatar">◎</div>}
             <div className="msg-bubble-wrap">
+              {msg.intent && intentLabel(msg.intent) && (
+                <div className="intent-tag">{intentLabel(msg.intent)}</div>
+              )}
               <div className="msg-bubble">
                 {msg.text.split('\n').map((line, j) => (
                   <React.Fragment key={j}>
-                    <span>{line}</span>
+                    {line.startsWith('•') ? (
+                      <div className="msg-bullet">{line}</div>
+                    ) : (
+                      <span>{line}</span>
+                    )}
                     {j < msg.text.split('\n').length - 1 && <br />}
                   </React.Fragment>
                 ))}
