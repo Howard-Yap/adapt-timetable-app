@@ -201,7 +201,6 @@ export default function ScheduleScreen({
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         onTouchCancel={handleTouchCancel}
-        style={{ touchAction: 'pan-y' }}
       >
         <div className="timeline-grid" ref={gridRef} style={{ height: totalHours * HOUR_HEIGHT }}>
           {hours.map(hourMins => (
