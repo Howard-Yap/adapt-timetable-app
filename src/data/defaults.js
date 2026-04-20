@@ -10,53 +10,7 @@ export const DEFAULT_PREFERENCES = {
 
 export const SAMPLE_FIXED_EVENTS = [];
 
-export const SAMPLE_TASKS = [
-  {
-    id: 't1',
-    title: 'Study Chapter 5',
-    duration: 90,
-    deadline: null,
-    priority: PRIORITY.HIGH,
-    status: STATUS.PENDING,
-    category: 'study',
-  },
-  {
-    id: 't2',
-    title: 'Complete Assignment',
-    duration: 120,
-    deadline: new Date(Date.now() + 86400000).toISOString(),
-    priority: PRIORITY.HIGH,
-    status: STATUS.PENDING,
-    category: 'study',
-  },
-  {
-    id: 't3',
-    title: 'Review Lecture Notes',
-    duration: 45,
-    deadline: null,
-    priority: PRIORITY.MEDIUM,
-    status: STATUS.PENDING,
-    category: 'study',
-  },
-  {
-    id: 't4',
-    title: 'Read Research Paper',
-    duration: 60,
-    deadline: null,
-    priority: PRIORITY.MEDIUM,
-    status: STATUS.PENDING,
-    category: 'reading',
-  },
-  {
-    id: 't5',
-    title: 'Plan Next Week',
-    duration: 30,
-    deadline: null,
-    priority: PRIORITY.LOW,
-    status: STATUS.PENDING,
-    category: 'admin',
-  },
-];
+export const SAMPLE_TASKS = [];
 
 export const WORK_STYLES = [
   { id: 'deep-work', label: 'Deep Work', desc: 'Long uninterrupted focus blocks', icon: '🧠' },
