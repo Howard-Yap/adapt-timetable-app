@@ -42,7 +42,7 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState([
     {
       role: 'ai',
-      text: "Hey! I'm your scheduling assistant. Tell me what's happening — I'll adapt your day instantly.\n\nTry: \"I'm running late\", \"Make today lighter\", or \"What's next?\"",
+      text: "Hey! I'm your scheduling assistant. Tell me what's happening — I'll adapt your day instantly.\n\nTry: \"I'm running late\", \"Add review notes for 45 mins\", or \"What's left today?\"",
       time: new Date(),
     }
   ]);
@@ -53,7 +53,6 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         setUser(firebaseUser);
-        // Load user data from Firestore
         const data = await loadUserData(firebaseUser.uid);
         if (data) {
           if (data.prefs) setPrefs(data.prefs);
@@ -117,9 +116,7 @@ export default function App() {
     }
   }, [onboarded]);
 
-  const handleLogin = (firebaseUser) => {
-    setUser(firebaseUser);
-  };
+  const handleLogin = (firebaseUser) => setUser(firebaseUser);
 
   const handleLogout = async () => {
     await signOut(auth);
@@ -146,51 +143,121 @@ export default function App() {
 
     if (mutation) {
       switch (mutation.type) {
+
         case 'COMPLETE_TASK':
           updatedCompleted = [...new Set([...updatedCompleted, mutation.taskId])];
-          updatedTasks = updatedTasks.map(t => t.id === mutation.taskId ? { ...t, status: STATUS.DONE } : t);
+          updatedTasks = updatedTasks.map(t =>
+            t.id === mutation.taskId ? { ...t, status: STATUS.DONE } : t
+          );
           setCompletedTaskIds(updatedCompleted);
           break;
+
         case 'SKIP_TASK':
           updatedSkipped = [...new Set([...updatedSkipped, mutation.taskId])];
-          updatedTasks = updatedTasks.map(t => t.id === mutation.taskId ? { ...t, status: STATUS.SKIPPED } : t);
+          updatedTasks = updatedTasks.map(t =>
+            t.id === mutation.taskId ? { ...t, status: STATUS.SKIPPED } : t
+          );
           setSkippedTaskIds(updatedSkipped);
           break;
+
         case 'RESCHEDULE_FROM':
           fromMins = mutation.fromMins;
           break;
+
         case 'SET_END_TIME':
           updatedEndMins = mutation.endMins;
           setEndDayMins(updatedEndMins);
           break;
+
         case 'LOWER_LOAD': {
           const lowIds = updatedTasks
             .filter(t => t.priority === PRIORITY.LOW && t.status === STATUS.PENDING)
             .map(t => t.id);
           updatedSkipped = [...new Set([...updatedSkipped, ...lowIds])];
-          updatedTasks = updatedTasks.map(t => lowIds.includes(t.id) ? { ...t, status: STATUS.SKIPPED } : t);
+          updatedTasks = updatedTasks.map(t =>
+            lowIds.includes(t.id) ? { ...t, status: STATUS.SKIPPED } : t
+          );
           setSkippedTaskIds(updatedSkipped);
           break;
         }
+
         case 'INCREASE_LOAD':
-          updatedTasks = updatedTasks.map(t => t.status === STATUS.SKIPPED ? { ...t, status: STATUS.PENDING } : t);
+          updatedTasks = updatedTasks.map(t =>
+            t.status === STATUS.SKIPPED ? { ...t, status: STATUS.PENDING } : t
+          );
           updatedSkipped = [];
           setSkippedTaskIds([]);
           break;
+
         case 'FULL_REBUILD':
           updatedSkipped = [];
-          updatedTasks = tasks.map(t => t.status === STATUS.SKIPPED ? { ...t, status: STATUS.PENDING } : t);
+          updatedTasks = tasks.map(t =>
+            t.status === STATUS.SKIPPED ? { ...t, status: STATUS.PENDING } : t
+          );
           setSkippedTaskIds([]);
           fromMins = getCurrentMins();
           break;
+
+        // ── NEW MUTATIONS ──────────────────────────────────────────
+
+        case 'ADD_TASK': {
+          // Give it a stable id and ensure status is pending
+          const newTask = {
+            ...mutation.task,
+            id: `t${Date.now()}`,
+            status: STATUS.PENDING,
+          };
+          updatedTasks = [...updatedTasks, newTask];
+          break;
+        }
+
+        case 'EXTEND_TASK': {
+          // Increase the duration of the target task then rebuild from now
+          updatedTasks = updatedTasks.map(t =>
+            t.id === mutation.taskId
+              ? { ...t, duration: (t.duration || 30) + mutation.extraMins }
+              : t
+          );
+          // Rebuild from current time so the extended block fits in remaining day
+          fromMins = getCurrentMins();
+          break;
+        }
+
+        case 'PRIORITISE_TASK': {
+          // Bump task to HIGH priority so scheduler sorts it first
+          updatedTasks = updatedTasks.map(t =>
+            t.id === mutation.taskId
+              ? { ...t, priority: PRIORITY.HIGH }
+              : t
+          );
+          fromMins = getCurrentMins();
+          break;
+        }
+
+        case 'FOCUS_MODE': {
+          // Insert a synthetic high-priority focus block starting now
+          const focusTask = {
+            id: `focus-${Date.now()}`,
+            title: '🎯 Focus block',
+            duration: mutation.duration,
+            priority: PRIORITY.HIGH,
+            status: STATUS.PENDING,
+            deadline: null,
+          };
+          updatedTasks = [focusTask, ...updatedTasks];
+          fromMins = mutation.fromMins ?? getCurrentMins();
+          break;
+        }
+
         default:
           break;
       }
+
       setTasks(updatedTasks);
     }
 
-    const endTimeStr = `${String(Math.floor(updatedEndMins/60)).padStart(2,'0')}:${String(updatedEndMins%60).padStart(2,'0')}`;
-    const fromStr = `${String(Math.floor(fromMins/60)).padStart(2,'0')}:${String(fromMins%60).padStart(2,'0')}`;
+    const endTimeStr = `${String(Math.floor(updatedEndMins / 60)).padStart(2, '0')}:${String(updatedEndMins % 60).padStart(2, '0')}`;
+    const fromStr = `${String(Math.floor(fromMins / 60)).padStart(2, '0')}:${String(fromMins % 60).padStart(2, '0')}`;
     const todayClasses = getTodayClasses(uniClasses);
     const result = buildSchedule({
       uniClasses: todayClasses,
@@ -219,7 +286,9 @@ export default function App() {
   };
 
   const toggleUniClass = (classId) => {
-    const updated = uniClasses.map(c => c.id === classId ? { ...c, enabled: !c.enabled } : c);
+    const updated = uniClasses.map(c =>
+      c.id === classId ? { ...c, enabled: !c.enabled } : c
+    );
     setUniClasses(updated);
     generateFreshSchedule(tasks, updated, prefs);
   };
@@ -268,7 +337,11 @@ export default function App() {
 
   if (authLoading) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0f0a12', color: '#d4a0d4', fontSize: 32, fontFamily: 'serif' }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        height: '100vh', background: '#0f0a12', color: '#d4a0d4',
+        fontSize: 32, fontFamily: 'serif'
+      }}>
         ◎
       </div>
     );
@@ -280,11 +353,11 @@ export default function App() {
   return (
     <div className="app-root">
       <div className="app-content">
-        {screen === 'dashboard' && <DashboardScreen {...sharedProps} />}
-        {screen === 'schedule' && <ScheduleScreen {...sharedProps} />}
-        {screen === 'chat' && <ChatScreen {...sharedProps} />}
-        {screen === 'tasks' && <TaskManagerScreen {...sharedProps} />}
-        {screen === 'timetable' && <TimetableScreen {...sharedProps} />}
+        {screen === 'dashboard'  && <DashboardScreen  {...sharedProps} />}
+        {screen === 'schedule'   && <ScheduleScreen   {...sharedProps} />}
+        {screen === 'chat'       && <ChatScreen        {...sharedProps} />}
+        {screen === 'tasks'      && <TaskManagerScreen {...sharedProps} />}
+        {screen === 'timetable'  && <TimetableScreen  {...sharedProps} />}
       </div>
       <nav className="bottom-nav">
         {NAV.map(item => (

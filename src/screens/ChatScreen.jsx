@@ -4,11 +4,12 @@ import { parseIntent, processIntent } from '../engine/aiAssistant';
 const QUICK_ACTIONS = [
   "I'm running late",
   "I'm ready to start",
-  "Make today lighter",
-  "Rebuild my day",
   "What's next?",
-  "I'm tired",
+  "What's left today?",
   "Skip this task",
+  "I'm tired",
+  "Focus mode for 1 hour",
+  "Rebuild my day",
 ];
 
 export default function ChatScreen({
@@ -63,23 +64,30 @@ export default function ChatScreen({
     if (input.trim() && !isTyping) sendMessage(input.trim());
   };
 
-  const formatTime = (d) => new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const formatTime = (d) =>
+    new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   const intentLabel = (type) => {
     const map = {
-      'RUNNING_LATE': '⏰ Late detected',
-      'FULL_REBUILD': '🔁 Rebuilding',
-      'LOWER_LOAD': '😌 Lightening load',
-      'SKIP_TASK': '⏭ Task skipped',
-      'MOVE_TASK': '📅 Task moved',
-      'COMPLETE_TASK': '✓ Task done',
-      'MARK_DONE': '✓ Marked done',
-      'SET_END_TIME': '🌙 End time updated',
+      'RUNNING_LATE':     '⏰ Late detected',
+      'FULL_REBUILD':     '🔁 Rebuilding',
+      'LOWER_LOAD':       '😌 Lightening load',
+      'SKIP_TASK':        '⏭ Task skipped',
+      'MOVE_TASK':        '📅 Task moved',
+      'COMPLETE_TASK':    '✓ Task done',
+      'MARK_DONE':        '✓ Marked done',
+      'SET_END_TIME':     '🌙 End time updated',
       'SET_REMAINING_TIME': '⏳ Time adjusted',
-      'START_AT': '⏰ Time shifted',
-      'TOOK_BREAK': '☕ Break noted',
-      'PUSH_ALL': '→ Schedule shifted',
-      'START_NOW': '▶ Starting now',
+      'START_AT':         '⏰ Time shifted',
+      'TOOK_BREAK':       '☕ Break noted',
+      'PUSH_ALL':         '→ Schedule shifted',
+      'START_NOW':        '▶ Starting now',
+      // new
+      'ADD_TASK':         '➕ Task added',
+      'EXTEND_TASK':      '⏱ Task extended',
+      'PRIORITISE_TASK':  '⬆ Priority raised',
+      'FOCUS_MODE':       '🎯 Focus mode on',
+      'QUERY_REMAINING':  '📋 Tasks remaining',
     };
     return map[type] || null;
   };
@@ -154,7 +162,11 @@ export default function ChatScreen({
           onChange={e => setInput(e.target.value)}
           disabled={isTyping}
         />
-        <button type="submit" className="send-btn" disabled={!input.trim() || isTyping}>
+        <button
+          type="submit"
+          className="send-btn"
+          disabled={!input.trim() || isTyping}
+        >
           ↑
         </button>
       </form>

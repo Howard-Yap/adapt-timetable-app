@@ -1,109 +1,278 @@
-import { minsToTime, timeToMins, formatDuration } from './scheduler';
+import { minsToTime, timeToMins, formatDuration, PRIORITY } from './scheduler';
+
+// =============================================
+// INTENT PARSER
+// Converts free-text messages into structured intents
+// =============================================
 
 export function parseIntent(message) {
   const msg = message.toLowerCase().trim();
 
-  const startAtMatch = msg.match(/start(?:ing)? at (\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
-  if (startAtMatch) {
-    const time = parseTimeFromMatch(startAtMatch);
-    return { type: 'START_AT', time, raw: message };
+  // --- ADD TASK ---
+  const addMatch =
+    msg.match(/^add\s+(.+?)(?:\s+to\s+(?:my\s+)?(?:schedule|list|tasks?))?$/i) ||
+    msg.match(/^i need to\s+(.+)$/i) ||
+    msg.match(/^remind me to\s+(.+)$/i) ||
+    msg.match(/^(?:can you\s+)?add\s+(.+?)\s+to\s+(?:my\s+)?(?:schedule|list|tasks?)/i) ||
+    msg.match(/^(?:schedule|put)\s+(.+?)\s+(?:in|on|into)\s+(?:my\s+)?(?:schedule|list|today)/i);
+  if (addMatch) {
+    const raw = addMatch[1].trim();
+    const { title, duration, priority } = parseTaskDetails(raw);
+    return { type: 'ADD_TASK', title, duration, priority, raw: message };
   }
 
-  if (/running late|i'?m late|got delayed|stuck/.test(msg)) {
-    const minsMatch = msg.match(/(\d+)\s*min/);
+  // --- EXTEND TASK ---
+  const extendMatch =
+    msg.match(/(?:need|give me|want)\s+(?:more|extra|another)\s+(?:time\s+)?(?:for\s+)?(?:on\s+)?(.+?)(?:\s*[,—–]\s*|\s+by\s+|\s+for\s+)(\d+)\s*(?:min(?:utes?)?|h(?:ours?)?)/i) ||
+    msg.match(/extend\s+(.+?)\s+by\s+(\d+)\s*(?:min(?:utes?)?|h(?:ours?)?)/i) ||
+    msg.match(/(\d+)\s*(?:more\s+)?(?:min(?:utes?)?|h(?:ours?)?)\s+(?:more\s+)?(?:for|on)\s+(.+)/i) ||
+    msg.match(/still\s+working\s+on\s+(.+)/i) ||
+    msg.match(/not\s+(?:done|finished)\s+(?:with\s+)?(.+)\s+yet/i);
+
+  if (extendMatch) {
+    // normalise group order: some patterns have (task, mins), one has (mins, task)
+    let taskHint, extraMins;
+    if (extendMatch[0].match(/^(\d+)\s*(?:more\s+)?(?:min|h)/i)) {
+      // pattern: "30 more mins for X"
+      const rawMins = extendMatch[1];
+      taskHint = extendMatch[2];
+      extraMins = parseMinutes(rawMins, extendMatch[0]);
+    } else if (extendMatch[2] && /^\d+$/.test(extendMatch[2])) {
+      taskHint = extendMatch[1];
+      extraMins = parseMinutes(extendMatch[2], extendMatch[0]);
+    } else {
+      // "still working on X" / "not done with X yet" — default 30 mins
+      taskHint = extendMatch[1];
+      extraMins = 30;
+    }
+    return { type: 'EXTEND_TASK', taskHint: taskHint?.trim(), extraMins, raw: message };
+  }
+
+  // --- PRIORITISE TASK ---
+  const priorityMatch =
+    msg.match(/(?:make|set|mark)\s+(.+?)\s+(?:as\s+)?(?:high|urgent|top|important)\s*(?:priority)?/i) ||
+    msg.match(/(.+?)\s+is\s+(?:urgent|important|high priority|top priority)/i) ||
+    msg.match(/(?:bump|move|push)\s+(.+?)\s+(?:up|to\s+the\s+top|higher)/i) ||
+    msg.match(/(?:prioriti[sz]e|prioritise)\s+(.+)/i);
+  if (priorityMatch) {
+    return { type: 'PRIORITISE_TASK', taskHint: priorityMatch[1].trim(), raw: message };
+  }
+
+  // --- FOCUS MODE ---
+  const focusMatch =
+    msg.match(/(?:focus\s+(?:mode|time|session)|no\s+interruptions?|deep\s+work|block\s+off)\s*(?:for\s+)?(\d+)?\s*(?:min(?:utes?)?|h(?:ours?)?)?/i) ||
+    msg.match(/(?:i\s+need\s+to\s+focus|let\s+me\s+focus|help\s+me\s+focus)/i) ||
+    msg.match(/block\s+(?:off\s+)?(\d+)\s*(?:min(?:utes?)?|h(?:ours?)?)/i);
+  if (focusMatch) {
+    const durStr = focusMatch[1];
+    const duration = durStr ? parseMinutes(durStr, focusMatch[0]) : 60;
+    return { type: 'FOCUS_MODE', duration, raw: message };
+  }
+
+  // --- QUERY REMAINING TASKS ---
+  if (
+    /how many tasks\s*(?:left|remaining|do i have)/i.test(msg) ||
+    /what(?:'s|\s+is)\s+(?:left|remaining)\s*(?:today|for today)?/i.test(msg) ||
+    /what\s+haven'?t\s+i\s+(?:done|finished|completed)/i.test(msg) ||
+    /tasks?\s+(?:left|remaining|to go)/i.test(msg) ||
+    /(?:still\s+)?(?:to\s+do|on\s+my\s+list)\s*(?:today)?/i.test(msg)
+  ) {
+    return { type: 'QUERY_REMAINING', raw: message };
+  }
+
+  // --- START AT (specific time) ---
+  const startAtMatch = msg.match(/start(?:ing)?\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+  if (startAtMatch) {
+    return { type: 'START_AT', time: parseTimeFromMatch(startAtMatch), raw: message };
+  }
+
+  // "X instead of Y" time rephrase
+  const insteadMatch = msg.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s+instead\s+of/i);
+  if (insteadMatch) {
+    return { type: 'START_AT', time: parseTimeFromMatch(insteadMatch), raw: message };
+  }
+
+  // --- RUNNING LATE ---
+  if (/running\s+late|i'?m\s+late|got\s+delayed|stuck\s+in|held\s+up|delayed/i.test(msg)) {
+    const minsMatch = msg.match(/(\d+)\s*min/i);
     const delay = minsMatch ? parseInt(minsMatch[1]) : 30;
     return { type: 'RUNNING_LATE', delayMins: delay, raw: message };
   }
 
-  const breakMatch = msg.match(/(?:took?|taking)\s+(?:a\s+)?(?:longer\s+)?break(?:\s+(?:for|of)\s+(\d+)\s*(?:min(?:utes?)?|h(?:ours?)?))?/);
+  // --- TOOK BREAK ---
+  const breakMatch = msg.match(
+    /(?:took?|taking|had|having|just\s+had)\s+(?:a\s+)?(?:longer\s+)?(?:break|rest|nap|breather)(?:\s+(?:for|of)\s+(\d+)\s*(?:min(?:utes?)?|h(?:ours?)?))?/i
+  ) || msg.match(/was\s+(?:resting|napping|on\s+a\s+break)\s+(?:for\s+)?(\d+)?\s*(?:min(?:utes?)?|h(?:ours?)?)?/i)
+    || msg.match(/took\s+(\d+)\s*(?:min(?:utes?)?)\s+off/i);
   if (breakMatch) {
-    const dur = breakMatch[1] ? parseInt(breakMatch[1]) : 30;
+    const dur = breakMatch[1] ? parseMinutes(breakMatch[1], breakMatch[0]) : 30;
     return { type: 'TOOK_BREAK', extraMins: dur, raw: message };
   }
 
-  const insteadMatch = msg.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*instead of/);
-  if (insteadMatch) {
-    const time = parseTimeFromMatch(insteadMatch);
-    return { type: 'START_AT', time, raw: message };
-  }
-
-  const pushAllMatch = msg.match(/push (?:everything|all|schedule) (?:by|back) (\d+)/);
+  // --- PUSH ALL ---
+  const pushAllMatch = msg.match(/push\s+(?:everything|all|(?:my\s+)?schedule)\s+(?:by|back|forward)\s+(\d+)/i);
   if (pushAllMatch) {
     return { type: 'PUSH_ALL', delayMins: parseInt(pushAllMatch[1]), raw: message };
   }
 
-  if (/skip|can'?t do|not doing|won'?t do|forget/.test(msg)) {
-    const taskHint = extractTaskHint(msg, ['skip', "can't do", 'not doing', "won't do", 'forget']);
+  // --- SKIP TASK ---
+  if (/skip|can'?t\s+do|not\s+doing|won'?t\s+do|forget\s+(?:about\s+)?|drop\s+|remove\s+/i.test(msg)) {
+    const taskHint = extractTaskHint(msg, ['skip', "can't do", 'not doing', "won't do", 'forget about', 'forget', 'drop', 'remove']);
     return { type: 'SKIP_TASK', taskHint, raw: message };
   }
 
-  const pushMatch = msg.match(/(?:push|move|reschedule)\s+(.+?)\s+(?:to\s+)?(tomorrow|next week|later)/);
-  if (pushMatch) {
-    return { type: 'MOVE_TASK', taskHint: pushMatch[1], when: pushMatch[2], raw: message };
+  // --- MOVE TASK ---
+  const moveMatch =
+    msg.match(/(?:push|move|reschedule|delay|defer|put\s+off)\s+(.+?)\s+(?:to\s+)?(tomorrow|next\s+week|later|another\s+day)/i) ||
+    msg.match(/i'?ll\s+do\s+(.+?)\s+(tomorrow|later|next\s+week)/i) ||
+    msg.match(/(?:do|tackle)\s+(.+?)\s+(tomorrow|later)/i);
+  if (moveMatch) {
+    return { type: 'MOVE_TASK', taskHint: moveMatch[1].trim(), when: moveMatch[2], raw: message };
   }
 
-  const doneMatch = msg.match(/(?:done|finished|completed|just did)\s+(?:with\s+)?(.+)/);
+  // --- MARK DONE ---
+  const doneMatch =
+    msg.match(/(?:done|finished|completed|just\s+did|just\s+finished|wrapped\s+up|ticked\s+off|knocked\s+out)\s+(?:with\s+)?(.+)/i) ||
+    msg.match(/^(?:i\s+)?did\s+(.+)$/i) ||
+    msg.match(/(.+)\s+is\s+done/i) ||
+    msg.match(/^done$/i);
   if (doneMatch) {
-    return { type: 'MARK_DONE', taskHint: doneMatch[1], raw: message };
+    const taskHint = doneMatch[1]?.trim() || '';
+    return { type: 'MARK_DONE', taskHint, raw: message };
   }
 
-  if (/tired|exhausted|burnt? ?out|need a break|not feeling/.test(msg)) {
+  // --- LOWER LOAD ---
+  if (/tired|exhausted|burnt?\s*out|need\s+a\s+break|not\s+feeling|overwhelmed|too\s+much/i.test(msg)) {
     return { type: 'LOWER_LOAD', level: 'tired', raw: message };
   }
-
-  if (/make (?:it|today|my day) lighter|lighten|ease up|less today/.test(msg)) {
+  if (/make\s+(?:it|today|my\s+day)\s+lighter|lighten|ease\s+up|less\s+today|take\s+it\s+easy/i.test(msg)) {
     return { type: 'LOWER_LOAD', level: 'lighter', raw: message };
   }
 
-  if (/more energy|feeling good|productive|let'?s go|on a roll/.test(msg)) {
+  // --- INCREASE LOAD ---
+  if (/more\s+energy|feeling\s+good|productive|let'?s\s+go|on\s+a\s+roll|i'?m\s+on\s+fire|pumped|motivated/i.test(msg)) {
     return { type: 'INCREASE_LOAD', raw: message };
   }
 
-  const onlyTimeMatch = msg.match(/(?:only have|got)\s+(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)\s*(?:left|remaining|today)?/);
+  // --- SET REMAINING TIME ---
+  const onlyTimeMatch = msg.match(/(?:only\s+have|(?:i\s+)?got|have)\s+(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)\s*(?:left|remaining|today)?/i);
   if (onlyTimeMatch) {
-    const hours = parseFloat(onlyTimeMatch[1]);
-    return { type: 'SET_REMAINING_TIME', hours, raw: message };
+    return { type: 'SET_REMAINING_TIME', hours: parseFloat(onlyTimeMatch[1]), raw: message };
   }
 
-  const endEarlierMatch = msg.match(/end (?:at|by|around)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
+  // --- SET END TIME ---
+  const endEarlierMatch = msg.match(/(?:end|stop|wrap\s+up|finish)\s+(?:at|by|around)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
   if (endEarlierMatch) {
-    const time = parseTimeFromMatch(endEarlierMatch);
-    return { type: 'SET_END_TIME', time, raw: message };
+    return { type: 'SET_END_TIME', time: parseTimeFromMatch(endEarlierMatch), raw: message };
   }
-
-  const finishByMatch = msg.match(/finish (?:at|by|around)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
+  const finishByMatch = msg.match(/(?:need\s+to\s+)?finish\s+by\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
   if (finishByMatch) {
-    const time = parseTimeFromMatch(finishByMatch);
-    return { type: 'SET_END_TIME', time, raw: message };
+    return { type: 'SET_END_TIME', time: parseTimeFromMatch(finishByMatch), raw: message };
   }
 
-  if (/start now|ready now|able to start|starting now|start early|begin now|free now|available now|ready to start|i'm ready|im ready/.test(msg)) {
+  // --- START NOW ---
+  if (/start\s+now|ready\s+now|able\s+to\s+start|starting\s+now|start\s+early|begin\s+now|free\s+now|available\s+now|ready\s+to\s+start|i'?m\s+ready|im\s+ready|let'?s\s+start|let'?s\s+go|let'?s\s+begin|begin|let'?s\s+do\s+this/i.test(msg)) {
     return { type: 'START_NOW', raw: message };
   }
 
-  if (/rebuild|start fresh|start over|reset|redo my day|new schedule/.test(msg)) {
+  // --- FULL REBUILD ---
+  if (/rebuild|start\s+fresh|start\s+over|reset|redo\s+my\s+day|new\s+schedule|replan|restructure|fix\s+my\s+schedule|reorgani[sz]e/i.test(msg)) {
     return { type: 'FULL_REBUILD', raw: message };
   }
 
-  if (/what'?s next|next task|what should|what do i do/.test(msg)) {
+  // --- QUERIES ---
+  if (/what'?s\s+next|next\s+task|what\s+should\s+(?:i\s+do)?|what\s+do\s+i\s+do/i.test(msg)) {
     return { type: 'QUERY_NEXT', raw: message };
   }
-
-  if (/how much time|time left|remaining time/.test(msg)) {
+  if (/how\s+much\s+time|time\s+left|remaining\s+time|how\s+long\s+(?:do\s+i\s+have|left)/i.test(msg)) {
     return { type: 'QUERY_TIME_LEFT', raw: message };
   }
-
-  if (/show (?:my )?schedule|what'?s on|my plan|today'?s plan/.test(msg)) {
+  if (/show\s+(?:my\s+)?schedule|what'?s\s+on|my\s+plan|today'?s\s+plan|what\s+(?:do\s+i\s+have|have\s+i\s+got)\s+(?:today|on)?/i.test(msg)) {
     return { type: 'QUERY_SCHEDULE', raw: message };
   }
 
   return { type: 'UNKNOWN', raw: message };
 }
 
+// =============================================
+// INTENT PROCESSOR
+// Converts parsed intents into mutations + responses
+// =============================================
+
 export function processIntent(intent, state) {
   const { schedule, tasks, currentMins, endDayMins, completedTaskIds, skippedTaskIds } = state;
 
   switch (intent.type) {
+
+    case 'ADD_TASK': {
+      const newTask = {
+        id: `task-added-${Date.now()}`,
+        title: intent.title,
+        duration: intent.duration,
+        priority: intent.priority,
+        status: 'pending',
+        deadline: null,
+      };
+      const priorityLabel = intent.priority === PRIORITY.HIGH ? 'high' : intent.priority === PRIORITY.MEDIUM ? 'medium' : 'low';
+      return {
+        mutation: { type: 'ADD_TASK', task: newTask },
+        response: `Added "${intent.title}" (${formatDuration(intent.duration)}, ${priorityLabel} priority) to your schedule. Rebuilding to fit it in.`,
+        triggerRebuild: true,
+      };
+    }
+
+    case 'EXTEND_TASK': {
+      const matched = findTask(intent.taskHint, tasks, schedule, currentMins);
+      const current = getCurrentBlock(schedule, currentMins);
+      const target = matched || (current?.taskId ? tasks.find(t => t.id === current.taskId) : null);
+      if (target) {
+        return {
+          mutation: { type: 'EXTEND_TASK', taskId: target.id, extraMins: intent.extraMins },
+          response: `Got it — giving "${target.title}" an extra ${formatDuration(intent.extraMins)}. Compressing the rest of your day to compensate.`,
+          triggerRebuild: true,
+        };
+      }
+      return { response: `I'm not sure which task to extend. Try saying "extend [task name] by 30 mins".`, triggerRebuild: false };
+    }
+
+    case 'PRIORITISE_TASK': {
+      const matched = findTask(intent.taskHint, tasks, schedule, currentMins);
+      if (matched) {
+        return {
+          mutation: { type: 'PRIORITISE_TASK', taskId: matched.id },
+          response: `"${matched.title}" is now high priority — moving it earlier in your schedule.`,
+          triggerRebuild: true,
+        };
+      }
+      return { response: `I couldn't find that task. Try saying the name more clearly.`, triggerRebuild: false };
+    }
+
+    case 'FOCUS_MODE': {
+      return {
+        mutation: { type: 'FOCUS_MODE', duration: intent.duration, fromMins: currentMins },
+        response: `Focus mode on — blocking ${formatDuration(intent.duration)} of uninterrupted time starting now. No task switches until you're done.`,
+        triggerRebuild: true,
+      };
+    }
+
+    case 'QUERY_REMAINING': {
+      const remaining = tasks.filter(t =>
+        !completedTaskIds.includes(t.id) &&
+        !skippedTaskIds.includes(t.id) &&
+        (t.status === 'pending' || t.status === 'delayed')
+      );
+      if (remaining.length === 0) {
+        return { response: `You've finished everything for today! 🌸`, triggerRebuild: false };
+      }
+      const high = remaining.filter(t => t.priority === PRIORITY.HIGH);
+      const list = remaining.slice(0, 5).map(t => `• ${t.title}`).join('\n');
+      const extra = remaining.length > 5 ? `\n…and ${remaining.length - 5} more.` : '';
+      return {
+        response: `You have ${remaining.length} task${remaining.length > 1 ? 's' : ''} left${high.length ? ` (${high.length} high priority)` : ''}:\n${list}${extra}`,
+        triggerRebuild: false,
+      };
+    }
+
     case 'START_AT': {
       const newStartMins = intent.time;
       const delay = newStartMins - currentMins;
@@ -118,10 +287,12 @@ export function processIntent(intent, state) {
       const d = intent.delayMins;
       const firstTask = schedule.find(b => b.type === 'task');
       const alreadyStarted = firstTask && currentMins >= firstTask.startMins;
-      const newFrom = alreadyStarted ? currentMins + d : (firstTask ? firstTask.startMins + d : currentMins + d);
+      const newFrom = alreadyStarted
+        ? currentMins + d
+        : (firstTask ? firstTask.startMins + d : currentMins + d);
       return {
         mutation: { type: 'RESCHEDULE_FROM', fromMins: newFrom },
-        response: `No worries — I've shifted everything forward by ${formatDuration(d)}. Your end time is still protected at ${minsToTime(endDayMins)}.`,
+        response: `No worries — shifted everything forward by ${formatDuration(d)}. Your end time is still protected at ${minsToTime(endDayMins)}.`,
         triggerRebuild: true,
       };
     }
@@ -130,7 +301,7 @@ export function processIntent(intent, state) {
       const extra = intent.extraMins;
       return {
         mutation: { type: 'RESCHEDULE_FROM', fromMins: currentMins + extra },
-        response: `Breaks are important! I've accounted for that extra ${formatDuration(extra)} and rebuilt your remaining schedule.`,
+        response: `Breaks are important! Accounted for that extra ${formatDuration(extra)} and rebuilt your remaining schedule.`,
         triggerRebuild: true,
       };
     }
@@ -138,7 +309,7 @@ export function processIntent(intent, state) {
     case 'PUSH_ALL': {
       return {
         mutation: { type: 'RESCHEDULE_FROM', fromMins: currentMins + intent.delayMins },
-        response: `Pushed everything forward by ${formatDuration(intent.delayMins)}. Your highest-priority tasks are kept for today.`,
+        response: `Pushed everything forward by ${formatDuration(intent.delayMins)}. Highest-priority tasks are kept for today.`,
         triggerRebuild: true,
       };
     }
@@ -148,7 +319,7 @@ export function processIntent(intent, state) {
       if (matched) {
         return {
           mutation: { type: 'SKIP_TASK', taskId: matched.id },
-          response: `Skipped "${matched.title}". I've moved it to your backlog and filled the gap with your next task.`,
+          response: `Skipped "${matched.title}". Moved to backlog and filled the gap with your next task.`,
           triggerRebuild: true,
         };
       }
@@ -157,7 +328,7 @@ export function processIntent(intent, state) {
         const task = tasks.find(t => t.id === current.taskId);
         return {
           mutation: { type: 'SKIP_TASK', taskId: current.taskId },
-          response: `Skipped "${task?.title || 'current task'}". Moving on — I've updated your schedule.`,
+          response: `Skipped "${task?.title || 'current task'}". Moving on — schedule updated.`,
           triggerRebuild: true,
         };
       }
@@ -169,7 +340,7 @@ export function processIntent(intent, state) {
       if (matched) {
         return {
           mutation: { type: 'SKIP_TASK', taskId: matched.id },
-          response: `Moved "${matched.title}" to ${intent.when}. Your schedule has been updated.`,
+          response: `Moved "${matched.title}" to ${intent.when}. Schedule updated.`,
           triggerRebuild: true,
         };
       }
@@ -199,7 +370,7 @@ export function processIntent(intent, state) {
 
     case 'LOWER_LOAD': {
       const lowTasks = tasks.filter(t =>
-        t.priority === 1 &&
+        t.priority === PRIORITY.LOW &&
         !completedTaskIds.includes(t.id) &&
         !skippedTaskIds.includes(t.id)
       );
@@ -210,8 +381,8 @@ export function processIntent(intent, state) {
         };
       }
       const msg = intent.level === 'tired'
-        ? `Totally understand — rest matters. I've removed ${lowTasks.length} low-priority task${lowTasks.length > 1 ? 's' : ''} from today.`
-        : `Done — moved ${lowTasks.length} optional task${lowTasks.length > 1 ? 's' : ''} to tomorrow. Focus on what matters most.`;
+        ? `Totally understand — rest matters. Removed ${lowTasks.length} low-priority task${lowTasks.length > 1 ? 's' : ''} from today.`
+        : `Done — moved ${lowTasks.length} optional task${lowTasks.length > 1 ? 's' : ''} out. Focus on what matters most.`;
       return {
         mutation: { type: 'LOWER_LOAD' },
         response: msg,
@@ -222,7 +393,7 @@ export function processIntent(intent, state) {
     case 'INCREASE_LOAD': {
       return {
         mutation: { type: 'INCREASE_LOAD' },
-        response: `Love the energy! I've pulled some backlog tasks into today's schedule.`,
+        response: `Love the energy! Pulled some backlog tasks into today's schedule.`,
         triggerRebuild: true,
       };
     }
@@ -239,7 +410,7 @@ export function processIntent(intent, state) {
     case 'SET_END_TIME': {
       return {
         mutation: { type: 'SET_END_TIME', endMins: intent.time },
-        response: `End time set to ${minsToTime(intent.time)}. Rebuilt your schedule — anything that doesn't fit moves to tomorrow.`,
+        response: `End time set to ${minsToTime(intent.time)}. Anything that doesn't fit moves to tomorrow.`,
         triggerRebuild: true,
       };
     }
@@ -249,7 +420,7 @@ export function processIntent(intent, state) {
       if (nextTask) {
         return {
           mutation: { type: 'RESCHEDULE_FROM', fromMins: currentMins },
-          response: `Let's go! I've moved "${nextTask.title}" to start right now and shifted everything accordingly.`,
+          response: `Let's go! Moved "${nextTask.title}" to start right now and shifted everything accordingly.`,
           triggerRebuild: true,
         };
       }
@@ -295,10 +466,12 @@ export function processIntent(intent, state) {
       const suggestions = [
         '"I\'m running late"',
         '"Skip this task"',
-        '"Make today lighter"',
+        '"Add [task name] to my schedule"',
+        '"Extend [task] by 30 mins"',
+        '"Make [task] high priority"',
+        '"Focus mode for 1 hour"',
+        '"What\'s left today?"',
         '"Rebuild my day"',
-        '"What\'s next?"',
-        '"Push [task] to tomorrow"',
       ];
       return {
         response: `I didn't quite catch that. Try saying something like:\n${suggestions.join('\n')}`,
@@ -308,13 +481,63 @@ export function processIntent(intent, state) {
   }
 }
 
+// =============================================
+// HELPERS
+// =============================================
+
 function parseTimeFromMatch(match) {
   let h = parseInt(match[1]);
   const m = match[2] ? parseInt(match[2]) : 0;
-  const ampm = match[3];
+  const ampm = match[3]?.toLowerCase();
   if (ampm === 'pm' && h < 12) h += 12;
   if (ampm === 'am' && h === 12) h = 0;
   return h * 60 + m;
+}
+
+function parseMinutes(value, fullMatch = '') {
+  const n = parseInt(value);
+  if (/h(?:ours?)?/i.test(fullMatch.slice(fullMatch.indexOf(value) + value.length, fullMatch.indexOf(value) + value.length + 5))) {
+    return n * 60;
+  }
+  return n;
+}
+
+/**
+ * Parse a raw task string like "review notes for 45 mins" or "finish essay, high priority"
+ * Returns { title, duration, priority }
+ */
+function parseTaskDetails(raw) {
+  let title = raw;
+  let duration = 30; // default 30 mins
+  let priority = PRIORITY.MEDIUM;
+
+  // Extract duration — "for 45 mins", "45 min", "1 hour", "1h"
+  const durMatch = raw.match(/(?:for\s+)?(\d+(?:\.\d+)?)\s*(h(?:ours?)?|hr?s?|min(?:utes?)?|m)\b/i);
+  if (durMatch) {
+    const n = parseFloat(durMatch[1]);
+    duration = /h/i.test(durMatch[2]) ? Math.round(n * 60) : Math.round(n);
+    title = raw.replace(durMatch[0], '').trim().replace(/,\s*$/, '').trim();
+  }
+
+  // Extract priority — "high priority", "urgent", "low priority"
+  if (/\b(?:high|urgent|important)\b/i.test(title)) {
+    priority = PRIORITY.HIGH;
+    title = title.replace(/\b(?:high\s+priority|urgent|important)\b/i, '').trim().replace(/,\s*$/, '').trim();
+  } else if (/\blow\s+priority\b/i.test(title)) {
+    priority = PRIORITY.LOW;
+    title = title.replace(/\blow\s+priority\b/i, '').trim().replace(/,\s*$/, '').trim();
+  }
+
+  // Clean up leading/trailing filler words
+  title = title
+    .replace(/^(?:to\s+|a\s+|an\s+)/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Capitalise first letter
+  title = title.charAt(0).toUpperCase() + title.slice(1);
+
+  return { title, duration, priority };
 }
 
 function extractTaskHint(msg, keywords) {
@@ -330,7 +553,9 @@ function findTask(hint, tasks, schedule, currentMins) {
   const h = hint.toLowerCase().trim();
   const exact = tasks.find(t => t.title.toLowerCase() === h);
   if (exact) return exact;
-  return tasks.find(t => t.title.toLowerCase().includes(h) || h.includes(t.title.toLowerCase())) || null;
+  return tasks.find(t =>
+    t.title.toLowerCase().includes(h) || h.includes(t.title.toLowerCase())
+  ) || null;
 }
 
 function getCurrentBlock(schedule, currentMins) {
