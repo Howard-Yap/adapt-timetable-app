@@ -23,6 +23,7 @@ const EMPTY_FORM = {
   category: '',
   recurring: false,
   recurringDays: [],
+  preferredTime: '',
 };
 
 export default function TaskManagerScreen({
@@ -58,6 +59,7 @@ export default function TaskManagerScreen({
       category: form.category,
       recurring: form.recurring,
       recurringDays: form.recurring ? form.recurringDays : [],
+      preferredTime: form.preferredTime || null,
     };
     if (editingTask) {
       onUpdateTask(editingTask, { ...taskData, status: STATUS.PENDING });
@@ -76,6 +78,7 @@ export default function TaskManagerScreen({
       category: task.category || '',
       recurring: task.recurring || false,
       recurringDays: task.recurringDays || [],
+      preferredTime: task.preferredTime || '',
     });
     setEditingTask(task.id);
     setShowForm(true);
@@ -255,6 +258,14 @@ export default function TaskManagerScreen({
               className="text-input"
               value={form.deadline}
               onChange={e => setForm(f => ({ ...f, deadline: e.target.value }))}
+            />
+
+            <label className="input-label">Preferred time (optional)</label>
+            <input
+              type="time"
+              className="text-input"
+              value={form.preferredTime}
+              onChange={e => setForm(f => ({ ...f, preferredTime: e.target.value }))}
             />
 
             {/* Recurring toggle */}
